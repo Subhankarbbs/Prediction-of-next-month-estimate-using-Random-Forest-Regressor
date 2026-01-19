@@ -9,12 +9,11 @@ import os
 import joblib
 
 # Try importing custom modules for the Manager section
-# These must be in the same directory as this file
 try:
     import data_cleanning as dc
     import train_model as tm
 except ImportError:
-    pass # Will handle this gracefully in the app if modules are missing
+    pass 
 
 # ==========================================
 # 1. GLOBAL APP CONFIGURATION
@@ -26,14 +25,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for Professional UI 
-# (Sidebar CSS removed so it uses the Default Streamlit Theme)
+# Custom CSS for Professional UI (Matches app.py accessibility fixes)
 st.markdown("""
 <style>
     /* Main Headings */
     .main-header {
-        font-size: 2.5rem; 
-        color: #3B82F6; 
+        font-size: 2.8rem; 
+        color: #3B82F6; /* Brighter Blue for better visibility */
         font-weight: 800; 
         margin-bottom: 0px;
         text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
@@ -70,7 +68,7 @@ with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/en/c/cf/Aadhaar_Logo.svg", width=120)
     st.title("System Navigation")
     
-    # This toggle determines which 'App' we are looking at
+    # Module Toggle
     app_mode = st.radio(
         "Select Module:", 
         ["📊 Aadhaar 360 Dashboard", "⚙️ Biometric Model Manager"]
@@ -190,12 +188,15 @@ if app_mode == "📊 Aadhaar 360 Dashboard":
                     
                     digital_score = (demo_total / total_updates * 100) if total_updates > 0 else 0
                     
-                    st.metric("Digital Maturity Score", f"{digital_score:.0f}/100")
+                    st.metric("Digital Maturity Score", f"{digital_score:.0f}/100", help="Percentage of residents using Digital Demographic Updates vs Physical Biometric Updates.")
                     if digital_score > 70:
                         st.caption("🌟 High Digital Adoption")
                         st.progress(int(digital_score) / 100)
+                    elif digital_score > 40:
+                        st.caption("⚠️ Growing Adoption")
+                        st.progress(int(digital_score) / 100)
                     else:
-                        st.caption("⚠️ Low Digital Adoption")
+                        st.caption("🛑 Low Digital Adoption")
                         st.progress(int(digital_score) / 100)
 
         # --- VIEW: ADMIN COMMAND CENTER ---
@@ -210,10 +211,10 @@ if app_mode == "📊 Aadhaar 360 Dashboard":
             # Cluster Banner
             c_id = row.get('Cluster_ID', 0)
             clusters = {
-                0: {"label": "Standard Operations", "color": "#2563eb", "msg": "Routine monitoring."},
+                0: {"label": "Standard Operations", "color": "#2563eb", "msg": "Routine monitoring required."},
                 1: {"label": "High Growth Zone", "color": "#16a34a", "msg": "Deploy ECMP Kits for new enrolments."},
                 2: {"label": "Catch-up / Crisis", "color": "#d97706", "msg": "High backlog. Deploy Hospital Teams."},
-                3: {"label": "Fraud Risk / Anomaly", "color": "#dc2626", "msg": "Audit Required: High Adult Entry."}
+                3: {"label": "Fraud Risk / Anomaly", "color": "#dc2626", "msg": "Audit Required: High Adult Entry + High Updates."}
             }
             info = clusters.get(c_id, clusters[0])
             st.markdown(f"""
@@ -224,12 +225,26 @@ if app_mode == "📊 Aadhaar 360 Dashboard":
 
             # KPI Metrics
             k1, k2, k3, k4 = st.columns(4)
-            k1.metric("UER Score", f"{row.get('UER_Score', 0):.2f}")
-            k2.metric("Catch-up Index", f"{row.get('Catch_Up_Index', 0):.1f}")
-            k3.metric("Adult Entry Rate", f"{row.get('Adult_Entry_Rate', 0)*100:.1f}%")
-            k4.metric("Bio Failure Proxy", f"{row.get('Adult_Bio_Intensity', 0):.2f}")
+            k1.metric("UER Score", f"{row.get('UER_Score', 0):.2f}", help="Ratio of Updates to Enrolments")
+            k2.metric("Catch-up Index", f"{row.get('Catch_Up_Index', 0):.1f}", delta="High Lag" if row.get('Catch_Up_Index', 0) > 5 else "Normal", delta_color="inverse")
+            k3.metric("Adult Entry Rate", f"{row.get('Adult_Entry_Rate', 0)*100:.1f}%", delta="Suspicious" if row.get('Adult_Entry_Rate', 0) > 0.05 else "Stable", delta_color="inverse")
+            k4.metric("Bio Failure Proxy", f"{row.get('Adult_Bio_Intensity', 0):.2f}", help="High value indicates frequent fingerprint failures.")
 
             st.markdown("---")
+            
+            # --- [ADDED FEATURE] Comparison Mode ---
+            compare_mode = st.toggle("🔄 Enable District Comparison Mode")
+            
+            if compare_mode:
+                st.markdown("### ⚔️ District Comparison")
+                comp_district = st.selectbox("Select District to Compare", [d for d in district_list if d != selected_district])
+                row_comp = df[(df['state'] == selected_state) & (df['district'] == comp_district)].iloc[0]
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Total Volume", f"{row['Grand_Total']:,}", delta=f"{row['Grand_Total'] - row_comp['Grand_Total']:,}")
+                c2.metric("Enrolment Total", f"{row['Enrol_Total']:,}", delta=f"{row['Enrol_Total'] - row_comp['Enrol_Total']:,}")
+                c3.metric("Update Total", f"{row['Update_Total']:,}", delta=f"{row['Update_Total'] - row_comp['Update_Total']:,}")
+                st.markdown("---")
             
             # Analytics Tabs
             tab1, tab2, tab3 = st.tabs(["📊 Resource Planning", "📉 Demographics", "🔍 Fraud & Anomalies"])
@@ -245,23 +260,38 @@ if app_mode == "📊 Aadhaar 360 Dashboard":
                             row.get('bio_age_5_17', 0) + row.get('bio_age_17_', 0)
                         ]
                     })
-                    fig = px.pie(types_data, values='Volume', names='Type', title="Workload Split", hole=0.4)
+                    fig = px.pie(types_data, values='Volume', names='Type', title="Workload Split", hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
                     st.plotly_chart(fig, use_container_width=True)
                 with c2:
                     st.info("💡 **Strategic Advice**")
                     if row.get('UER_Score', 0) > 5:
                         st.write("• **Market Saturated:** Focus on UCL (Update Client Lite).")
+                        st.write("• Stop buying new ECMP Kits.")
                     else:
                         st.write("• **High Growth:** Deploy GPS Enrolment Kits.")
+                        st.write("• Schedule camps in schools.")
 
             with tab2:
                 st.subheader("Population Dynamics")
-                age_df = pd.DataFrame({
-                    'Group': ['Infants (0-5)', 'School (5-17)', 'Adults (18+)'],
-                    'Enrolments': [row.get('age_0_5', 0), row.get('age_5_17', 0), row.get('age_18_greater', 0)]
-                })
-                fig = px.bar(age_df, x='Group', y='Enrolments', color='Group', title="New Enrolment by Age")
-                st.plotly_chart(fig, use_container_width=True)
+                c1, c2 = st.columns([2, 1])
+                
+                with c1:
+                    age_df = pd.DataFrame({
+                        'Group': ['Infants (0-5)', 'School (5-17)', 'Adults (18+)'],
+                        'Enrolments': [row.get('age_0_5', 0), row.get('age_5_17', 0), row.get('age_18_greater', 0)]
+                    })
+                    fig = px.bar(age_df, x='Group', y='Enrolments', color='Group', title="New Enrolment by Age")
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                with c2:
+                    # --- [ADDED FEATURE] Neonatal Gap Analysis ---
+                    st.write("**Key Indicators**")
+                    catch_up = row.get('Catch_Up_Index', 0)
+                    st.metric("Neonatal Gap", f"{catch_up:.1f}x")
+                    if catch_up > 3:
+                        st.error("School-age enrolment is much higher than birth enrolment. Babies are being missed.")
+                    else:
+                        st.success("Birth registration ecosystem is healthy.")
 
             with tab3:
                 st.subheader("Fraud Detection Radar")
@@ -270,9 +300,21 @@ if app_mode == "📊 Aadhaar 360 Dashboard":
                 ghost_proxy = enrol_tot / (update_tot + 1)
                 
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Ghost Village Proxy", f"{ghost_proxy:.2f}")
-                c2.metric("Hardware Risk", f"{row.get('Adult_Bio_Intensity', 0):.2f}")
-                c3.metric("Operator Error Rate", f"{row.get('Correction_Intensity', 0):.2f}")
+                
+                with c1:
+                    st.metric("Ghost Village Proxy", f"{ghost_proxy:.2f}")
+                    if ghost_proxy > 10:
+                        st.error("🚨 High Risk: Many enrolments, zero updates.")
+                
+                with c2:
+                    st.metric("Hardware Risk", f"{row.get('Adult_Bio_Intensity', 0):.2f}")
+                    if row.get('Adult_Bio_Intensity', 0) > 2.0:
+                        st.warning("⚠️ Hardware may be faulty.")
+                
+                with c3:
+                    st.metric("Operator Error Rate", f"{row.get('Correction_Intensity', 0):.2f}")
+                    if row.get('Correction_Intensity', 0) > 5.0:
+                        st.error("🚨 High corrections. Audit operators.")
 
 # ==========================================
 # 4. MODULE: BIOMETRIC MODEL MANAGER
@@ -302,8 +344,8 @@ elif app_mode == "⚙️ Biometric Model Manager":
         
         # Check for dependencies
         try:
-            import data_cleanning
-            import train_model
+            import data_cleanning as dc
+            import train_model as tm
             has_modules = True
         except ImportError:
             has_modules = False
@@ -318,12 +360,42 @@ elif app_mode == "⚙️ Biometric Model Manager":
                 st.dataframe(new_data.head())
                 
                 if st.button("Validate, Merge & Retrain", type="primary"):
+                    
+                    # --- Check Column Consistency First ---
+                    if os.path.exists(MASTER_DATA_PATH):
+                        # Read only the header of the master file for efficiency
+                        master_header = pd.read_csv(MASTER_DATA_PATH, nrows=0)
+                        
+                        # Get sets of columns
+                        master_cols = set(master_header.columns)
+                        new_cols = set(new_data.columns)
+                        
+                        # Compare
+                        if master_cols != new_cols:
+                            missing = master_cols - new_cols
+                            extra = new_cols - master_cols
+                            
+                            st.error("⛔ CRITICAL ERROR: Column mismatch detected.")
+                            if missing:
+                                st.write(f"**Missing Columns:** {missing}")
+                            if extra:
+                                st.write(f"**Extra Columns:** {extra}")
+                            
+                            st.stop() # Halts execution here
+                    else:
+                        st.warning("⚠️ Master dataset not found. Proceeding with upload as the initial dataset.")
+
+                    # --- If columns match, proceed to Data Validation ---
                     st.info("Running validation checks...")
                     try:
                         # 1. Validation
                         dc.inspect_nulls(new_data)
                         dc.check_placeholders(new_data)
-                        dc.check_numeric_logic(new_data)
+                        
+                        numeric_cols = ['Bio_bio_age_5_17', 'Bio_bio_age_17_']
+                        existing_numeric = [c for c in numeric_cols if c in new_data.columns]
+                        if (new_data[existing_numeric] < 0).any().any():
+                             raise ValueError("Dataset contains negative values in biometric columns.")
                         
                         if os.path.exists(DISTRICT_FILE_PATH):
                             dc.validate_districts(new_data, DISTRICT_FILE_PATH)
