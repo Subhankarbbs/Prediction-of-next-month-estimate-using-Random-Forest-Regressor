@@ -1,0 +1,10 @@
+.ipynb_checkpoints
+anaconda_projects
+__pycache__/
+*.pyc
+tmp.py
+generateDistrictTxt.py
+maintmp.py
+Dataset.csv
+.~lock.Dataset_Cleaned.csv#
+biometric_model_v1.pkl
